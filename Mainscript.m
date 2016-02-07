@@ -2,9 +2,30 @@ clc
 clear all
 close all
 
-%% Catalog
+%set(0,'defaultlinelinewidth',2)
+%set(gca,'DefaultTextFontSize',25)
 
-load('catalog.mat');
+%% load amc files
+% files = dir('Training/*.amc');
+% Dtrain=[];
+% for k = 1:length(files)
+%     Dtrain{k} = amc_to_matrix(strcat('Training/',files(k).name));
+% end
+% 
+ %% Walk catalog
+% catalogWalk=[];
+% lengthsequence=[];
+%  for k=1:22
+%      tempcatalog=[Dtrain{k}(1:end-1,:) Dtrain{k}(2:end,:)];
+%      lengthsequence=[lengthsequence size(tempcatalog,1)];
+%      catalogWalk=[catalogWalk;tempcatalog];
+%  end
+
+%% Catalog
+%  catalog=catalogWalk;
+%  save('cataloglag0.mat','catalog','lengthsequence');
+load('cataloglag0.mat');
+indicesOfSequences=[0 cumsum(lengthsequence)];
 analogs=catalog(:,56:62);
 succesors=catalog(:,62+56:62+62);
 rmsExpect=[];
@@ -14,35 +35,60 @@ rmsMax=[];
 R=0.1;
 
 D = amc_to_matrix('35_34.amc');
+
 testdata=D(:,56:62)';
 g = @(x,t) x(:,t);
 yo=testdata+sqrt(R).*randn(size(testdata));
 
-MaskInd=(find(rand(size(yo))>0.5));
+%MaskInd=(find(rand(size(yo))>0.5));
+MaskInd=(7*149+1):(7*299+1);
 length(MaskInd)
+%yo(33:62,100:end)=NaN;
 yo(MaskInd)=NaN;
 
+%% In case you use embedding lagged states
+lag=2;
+laggedsuccessors=[];
+laggedanalogs=[];
+
+for j=2:length(indicesOfSequences)
+tmpa=[];
+tmps=[];
+for i=1:lag+1
+tmpa=[tmpa analogs(indicesOfSequences(j-1)+lag+2-i:indicesOfSequences(j)-i+1,:)];
+tmps=[tmps succesors(indicesOfSequences(j-1)+lag+2-i:indicesOfSequences(j)-i+1,:)];
+end
+laggedanalogs=[laggedanalogs; tmpa];
+laggedsuccessors=[laggedsuccessors; tmps];
+end
+analogsL=laggedanalogs;
+succesorsL=laggedsuccessors;
+
 %% Construction of Transition matrix
+
 disp('Construction of Transition matrix..')
-states=union(analogs,succesors,'rows');
+states=union(analogsL,succesorsL,'rows');
 T_train=size(states,1);
 
-scaledanalogs=(analogs-repmat(mean(analogs),size(analogs,1),1))./repmat(std(analogs),size(analogs,1),1);
+scaledanalogs=(analogsL-repmat(mean(analogsL),size(analogsL,1),1))./repmat(std(analogsL),size(analogsL,1),1);
 scaledstates=(states-repmat(mean(states),size(states,1),1))./repmat(std(states),size(states,1),1);
 
-K=8;    
+
+for k=8    
 [index_wknn,dist_wknn]=knnsearch(scaledanalogs,scaledstates,'k',k,'NSMethod','kdtree');
-dist_wknn_norm=(dist_wknn.^2)./(2.*repmat(var(dist_wknn')',1,k)); 
+%dist_wknn_norm=dist_wknn./median(dist_wknn(:)); %!!!!!!
+dist_wknn_norm=(dist_wknn.^2)./(2.*repmat(var(dist_wknn')',1,k)); %!!!!!!
 s=mk_stochastic(exp(-dist_wknn_norm));
-[LIA,LOCB] = ismember(succesors(index_wknn(:),:),states,'rows');
+%s(s<median(median(s)))=0;
+[LIA,LOCB] = ismember(succesorsL(index_wknn(:),:),states,'rows');
 transmat=sparse(repmat(linspace(1,T_train,T_train)',k,1),LOCB,s(:),T_train,T_train);
 % 
 %  figure
 %  spy(transmat)
 %  legend('Transition matrix non null elements')
 
-nbpart=9000;  %Truncating
-xt_train=states';
+nbpart=9000;
+xt_train=states(:,1:size(testdata,1))';
 
 %% Analog FB
 prior=ones(T_train,1);
@@ -94,8 +140,10 @@ plot(testdata(7,:)); hold on %righthand
 %plot(yo(7,:),'go')
 plot(ResFBexpect(7,:),'r--')
 title('7','FontSize', 16);
+set(gcf,'PaperPositionMode', 'auto');
 ll=legend('True','AnFB');
 set(ll,'Position',[0.49495907738095 0.491564948764315 0.0440104166666667 0.0417985232067511])
+print -depsc2 mocap2.eps
 % 
 %% naive nearest neighbors
 InterpYo=zeros(size(yo));
@@ -115,7 +163,6 @@ figure
 plot(testdata(1,:)); hold on %righthand
 plot(yo(1,:),'g*')
 plot(InterpYo(1,:),'r')
-
 %% Matrix to AMC
 resultExpect=[D(:,1:55) ResFBexpect'];
 obs=[D(:,1:55) yo'];
@@ -151,3 +198,6 @@ title('Obsevations','FontSize', 14);
 subplot(1,3,3)
 imagesc(ResFBexpect)
 title('AnFB','FontSize', 14);
+set(gcf,'PaperPositionMode', 'auto');
+print -depsc2 obsNaN.eps
+
